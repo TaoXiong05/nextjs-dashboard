@@ -61,12 +61,13 @@ export async function updateInvoice(id: string, formData: FormData) {
         WHERE id = ${id}
       `;
 
-        revalidatePath('/dashboard/invoices');
+
 
     } catch (error) {
         console.error('Error updating invoice:', error);
         // return { message: 'Database Error: Failed to Update Invoice.' };
     }
+    revalidatePath('/dashboard/invoices');
     redirect('/dashboard/invoices');
 
 }
