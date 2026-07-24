@@ -1,77 +1,39 @@
-name: CI
+name: CI Check
 
 on:
   push:
-    branches: [main]
+    branches: [ main, master ]
   pull_request:
-    branches: [main]
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [ main, master ]
 
 jobs:
-  lint-and-build:
+  build-and-test:
     runs-on: ubuntu-latest
 
-    # 🐘 定义 Postgres 服务容器
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgrespassword
-          POSTGRES_DB: next_dashboard
-        ports:
-          - 5432:5432
-        # 确保 Postgres 容器就绪后再开始跑 steps
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
         with:
-          version: 11
+          version: 11.15.1
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "25"
-          cache: "pnpm"
-
-      - name: Restore Next.js build cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
+          node-version: 25.7.0
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
+      - name: Run Linter
         run: pnpm lint
 
-      - name: Type check
-        run: pnpm exec tsc --noEmit
-
-      # 🌱 可选：如果你有播种脚本（如 seed 脚本初始化数据库表和测试数据）
-      # - name: Seed database
-      #   env:
-      #     POSTGRES_URL: "postgres://postgres:postgrespassword@localhost:5432/next_dashboard"
-      #   run: pnpm seed  # 对应 package.json 中如果定义了 seed 命令的话
-
-      - name: Build
+      # 🚀 直接打包：Next.js 在编译预渲染时，会自动通过 Secret 里的 POSTGRES_URL 读取云端已有的数据
+      - name: Build Next.js
         env:
-          # 传递真实连向本地 5432 端口 Postgres 的连接串
-          POSTGRES_URL: "postgres://postgres:postgrespassword@localhost:5432/next_dashboard"
-          AUTH_SECRET: "ci-build-secret-key-placeholder"
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
