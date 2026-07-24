@@ -2,7 +2,8 @@
 # 阶段 1：安装依赖 (deps)
 # ---------------------------------------------------
 FROM node:25-alpine AS deps
-RUN corepack enable && corepack prepare pnpm@11.15.1 --activate
+# 💡 Node 25 移除了默认的 Corepack，推荐直接通过 npm 安装指定版本的 pnpm
+RUN npm install -g pnpm@11.15.1
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
@@ -12,14 +13,22 @@ RUN pnpm install --frozen-lockfile
 # 阶段 2：编译构建 (builder)
 # ---------------------------------------------------
 FROM node:25-alpine AS builder
-RUN corepack enable && corepack prepare pnpm@11.15.1 --activate
+RUN npm install -g pnpm@11.15.1
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# 编译 Next.js
+# 💡 声明构建参数，接收来自 GitHub Actions 的 build-args
+ARG POSTGRES_URL
+ARG AUTH_SECRET
+
+# 将参数转化为构建时的环境变量供 Next.js 编译使用
+ENV POSTGRES_URL=$POSTGRES_URL
+ENV AUTH_SECRET=$AUTH_SECRET
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# 编译 Next.js
 RUN pnpm build
 
 # ---------------------------------------------------
