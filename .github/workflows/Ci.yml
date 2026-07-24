@@ -133,6 +133,12 @@ jobs:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
 
+        # 🌟 关键：拷贝 Standalone 产物及静态资源，用于 Serverless/App Service 独立运行
+      - name: Prepare standalone package
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+
       - name: Deploy to Preview Azure Web App
         uses: azure/webapps-deploy@v3
         with:
@@ -175,6 +181,12 @@ jobs:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }} # 自动拉取 Production 环境下的数据库链接
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
+
+        # 🌟 关键：拷贝 Standalone 产物及静态资源，用于 Serverless/App Service 独立运行
+      - name: Prepare standalone package
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
 
       - name: Deploy to Production Azure Web App
         uses: azure/webapps-deploy@v3
