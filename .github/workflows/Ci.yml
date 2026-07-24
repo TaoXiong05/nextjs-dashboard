@@ -141,11 +141,19 @@ jobs:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
 
-        # 🌟 关键：拷贝 Standalone 产物及静态资源，用于 Serverless/App Service 独立运行
+        # 🌟 1. 拷贝静态资源到 standalone 目录
       - name: Prepare standalone package
         run: |
+          mkdir -p .next/standalone/.next
           cp -r .next/static .next/standalone/.next/static
           cp -r public .next/standalone/public
+
+      # 🌟 2. 压缩 standalone，注意 zip 命令添加 -y 标志（保持符号链接）
+      - name: Zip standalone package
+        run: |
+          cd .next/standalone
+          zip -r -y ../../deploy.zip .
+          cd ../..
 
       - name: Deploy to Preview Azure Web App
         uses: azure/webapps-deploy@v3
@@ -190,11 +198,19 @@ jobs:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
 
-        # 🌟 关键：拷贝 Standalone 产物及静态资源，用于 Serverless/App Service 独立运行
+        # 🌟 1. 拷贝静态资源到 standalone 目录
       - name: Prepare standalone package
         run: |
+          mkdir -p .next/standalone/.next
           cp -r .next/static .next/standalone/.next/static
           cp -r public .next/standalone/public
+
+      # 🌟 2. 压缩 standalone，注意 zip 命令添加 -y 标志（保持符号链接）
+      - name: Zip standalone package
+        run: |
+          cd .next/standalone
+          zip -r -y ../../deploy.zip .
+          cd ../..
 
       - name: Deploy to Production Azure Web App
         uses: azure/webapps-deploy@v3
