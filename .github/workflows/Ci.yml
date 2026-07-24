@@ -2,18 +2,18 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master, 'TaoXiong05-patch-1', 'feature/*' ] # 👈 添加你的分支，让分支 Push 时能触发 Preview
+    branches: [ main, master, 'TaoXiong05-patch-1', 'feature/*' ]
   pull_request:
-    branches: [ main, master ] # 当发起合并到 main 的 PR 时触发校验
+    branches: [ main, master ]
 
-# 并发控制：当连续 Push 代码时，自动取消上一次还没跑完的构建
+# 并发控制：连续 Push 时自动取消未跑完的构建
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   # ==========================================
-  # Job 1: CI 自动化校验
+  # Job 1: CI 自动化校验 (Lint & 本地 Build 测试)
   # ==========================================
   build-and-test:
     runs-on: ubuntu-latest
@@ -39,22 +39,14 @@ jobs:
       - name: Run Linter
         run: pnpm lint
 
-      - name: Build Next.js
+      - name: Build Next.js Verification
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
 
-        # 🌟 1. 复制静态文件到 standalone 文件夹（Next.js standalone 模式必须步骤）
-      - name: Copy static files to standalone
-        run: |
-          cp -r .next/static .next/standalone/.next/static
-          cp -r public .next/standalone/public
-
-     
-
   # ==========================================
-  # Job 2: CD Docker 镜像构建与自动推送（包含 PR 环境验证）
+  # Job 2: CD 构建 Docker 镜像并推送至 GitHub GHCR
   # ==========================================
   deploy-docker:
     needs: build-and-test
@@ -62,7 +54,7 @@ jobs:
 
     permissions:
       contents: read
-      packages: write # 开启写入 GitHub 镜像仓库 (GHCR) 的权限
+      packages: write # 开启写入 GHCR 镜像仓库权限
 
     steps:
       - name: Checkout repository
@@ -71,7 +63,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 自动登录 GitHub 官方提供的 Docker 镜像仓库 (GHCR)
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -79,7 +70,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 智能生成镜像标签：区分生产环境和分支/PR 测试环境
+      # 智能提取 Tag 标签：
+      # main/master 分支 -> latest 和 sha
+      # 其他 Preview 分支 -> 分支名 和 sha
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -91,7 +84,6 @@ jobs:
             type=ref,event=pr
             type=sha,format=short
 
-      # 打包镜像并推送至 GitHub 云端仓库
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
@@ -106,133 +98,45 @@ jobs:
             AUTH_SECRET=${{ secrets.AUTH_SECRET }}
 
   # ==========================================
-  # Job 3a: 部署【Preview 预览/测试环境】(当非 main 分支提交时触发)
+  # Job 3a: 自动部署 Docker 镜像到【Preview 预览/测试环境】
   # ==========================================
   deploy-preview:
-    needs: build-and-test
-    # 当有 push 事件且分支不是 main 或 master 时触发部署
+    needs: deploy-docker # 👈 修改为等待 Docker 镜像推送完毕后执行
     if: github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
 
-    # 🌟 关键：自动使用 GitHub 设置中 "Preview" 环境里的 Secrets
     environment: Preview
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 11.15.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.15.0
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Next.js
-        env:
-          POSTGRES_URL: ${{ secrets.POSTGRES_URL }} # 自动拉取 Preview 环境下的数据库链接
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
-        run: pnpm build
-
-        # 🌟 1. 拷贝静态资源到 standalone 目录
-      - name: Prepare standalone package
+      # 智能将分支名称格式化（转小写、特殊字符转横杠），保障与 GHCR 镜像 Tag 对应
+      - name: Sanitize Branch Name for Docker Tag
+        id: extract_branch
         run: |
-          mkdir -p .next/standalone/.next
-          cp -r .next/static .next/standalone/.next/static
-          cp -r public .next/standalone/public
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+          SANITIZED_TAG=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9._-]/-/g')
+          echo "tag=$SANITIZED_TAG" >> $GITHUB_OUTPUT
 
-      # 🌟 2. 关键突破：解开 pnpm 软链接，强制重构 node_modules 为真实物理文件
-      - name: Dereference Symlinks
-        run: |
-          cd .next/standalone
-          # 复制并替换所有软链接为实际的文件/文件夹（彻底解决 zip / Azure 不支持 symlink 的问题）
-          cp -rL node_modules node_modules_flat
-          rm -rf node_modules
-          mv node_modules_flat node_modules
-
-      # 🌟 3. 打包解开软链接后的 standalone 产物
-      - name: Zip standalone package
-        run: |
-          cd .next/standalone
-          zip -r ../../deploy.zip .
-          cd ../..
-
-      - name: Deploy to Preview Azure Web App
+      - name: Deploy Docker Container to Preview Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ secrets.AZURE_APP_NAME }} # 在 Preview 环境的 Secrets 中填测试 Azure App 名字
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # 自动拉取 Preview 环境下的发布凭据
-          package: .next/standalone
+          app-name: ${{ secrets.AZURE_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: 'ghcr.io/${{ github.repository }}:${{ steps.extract_branch.outputs.tag }}' # 👈 部署当前分支的专属 Docker 镜像
 
   # ==========================================
-  # Job 3b: 部署【Production 生产环境】(当合并到 main/master 时触发)
+  # Job 3b: 自动部署 Docker 镜像到【Production 生产环境】
   # ==========================================
   deploy-production:
-    needs: build-and-test
-    # 当推送到 main 或 master 分支时触发
+    needs: deploy-docker # 👈 修改为等待 Docker 镜像推送完毕后执行
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
 
-    # 🌟 关键：自动使用 GitHub 设置中 "Production" 环境里的 Secrets
     environment: Production
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 11.15.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.15.0
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Next.js
-        env:
-          POSTGRES_URL: ${{ secrets.POSTGRES_URL }} # 自动拉取 Production 环境下的数据库链接
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
-        run: pnpm build
-
-        # 🌟 1. 拷贝静态资源到 standalone 目录
-      - name: Prepare standalone package
-        run: |
-          mkdir -p .next/standalone/.next
-          cp -r .next/static .next/standalone/.next/static
-          cp -r public .next/standalone/public
-
-      # 🌟 2. 关键突破：解开 pnpm 软链接，强制重构 node_modules 为真实物理文件
-      - name: Dereference Symlinks
-        run: |
-          cd .next/standalone
-          # 复制并替换所有软链接为实际的文件/文件夹（彻底解决 zip / Azure 不支持 symlink 的问题）
-          cp -rL node_modules node_modules_flat
-          rm -rf node_modules
-          mv node_modules_flat node_modules
-
-      # 🌟 3. 打包解开软链接后的 standalone 产物
-      - name: Zip standalone package
-        run: |
-          cd .next/standalone
-          zip -r ../../deploy.zip .
-          cd ../..
-
-      - name: Deploy to Production Azure Web App
+      - name: Deploy Docker Container to Production Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ secrets.AZURE_APP_NAME }} # 在 Production 环境的 Secrets 中填生产 Azure App 名字
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # 自动拉取 Production 环境下的发布凭据
-          package: .next/standalone
+          app-name: ${{ secrets.AZURE_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: 'ghcr.io/${{ github.repository }}:latest' # 👈 生产环境直接拉取 :latest 镜像
