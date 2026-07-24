@@ -150,6 +150,7 @@ export async function deleteInvoice(id: string) {
         throw error;
     }
     revalidatePath('/dashboard/invoices');
+    redirect('/dashboard/invoices');
 
 }
 
