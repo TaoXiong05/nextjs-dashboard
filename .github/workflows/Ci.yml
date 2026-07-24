@@ -1,0 +1,53 @@
+name: CI
+
+# 触发条件：
+# - push 到 main 分支
+# - 对 main 分支发起 pull request 时（这样合并前就能看到检查结果）
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支上有新的 push 时，取消掉旧的、还没跑完的流程，省资源
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 把仓库代码拉到 runner 上
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # 2. 安装 pnpm（要放在 setup-node 之前，因为下一步要用 pnpm 做缓存）
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # 3. 安装 Node，并让 setup-node 自动缓存 pnpm store，加速后续运行
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      # 4. 安装依赖（--frozen-lockfile 保证严格按 lockfile 安装，
+      #    如果 lockfile 和 package.json 对不上会直接报错，而不是静默改动它）
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 5. ESLint 检查代码规范
+      - name: Lint
+        run: pnpm lint
+
+      # 6. TypeScript 类型检查（不生成文件，只检查类型错误）
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+
+      # 7. 构建，验证生产环境能否正常打包
+      - name: Build
+        run: pnpm build
