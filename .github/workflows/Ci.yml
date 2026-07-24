@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'TaoXiong05-patch-1', 'feature/*' ] # 👈 添加你的分支，让分支 Push 时能触发 Preview
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master ] # 当发起合并到 main 的 PR 时触发校验
 
 # 并发控制：当连续 Push 代码时，自动取消上一次还没跑完的构建
 concurrency:
@@ -50,7 +50,6 @@ jobs:
   # ==========================================
   deploy-docker:
     needs: build-and-test
-    # 💡 移除了原本的 if 限制，使得 PR 分支通过 CI 后也能跑 CD 进行打包验证
     runs-on: ubuntu-latest
 
     permissions:
@@ -70,20 +69,18 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }} # 自动注入，无需额外设置 Secret
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 💡 智能生成镜像标签：区分生产环境和 PR 测试环境
+      # 智能生成镜像标签：区分生产环境和分支/PR 测试环境
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            # 1. 只有推送到 main/master 时，才打上 :latest 标签（生产镜像）
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
-            # 2. 如果是 PR 事件，打上 :pr-12 这种专属测试标签（用于在测试环境验证 CD）
+            type=ref,event=branch
             type=ref,event=pr
-            # 3. 任何提交都带上提交哈希前缀，如 :sha-a1b2c3d
             type=sha,format=short
 
       # 打包镜像并推送至 GitHub 云端仓库
@@ -100,17 +97,17 @@ jobs:
             POSTGRES_URL=${{ secrets.POSTGRES_URL }}
             AUTH_SECRET=${{ secrets.AUTH_SECRET }}
 
-
-
-
-            # ==========================================
-  # Job 3: 源码部署到 Azure App Service (免费层)
   # ==========================================
-  deploy-branch-to-azure:
+  # Job 3a: 部署【Preview 预览/测试环境】(当非 main 分支提交时触发)
+  # ==========================================
+  deploy-preview:
     needs: build-and-test
-    # 允许在当前分支推送时触发部署
-    if: github.event_name == 'push'
+    # 当有 push 事件且分支不是 main 或 master 时触发部署
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
+
+    # 🌟 关键：自动使用 GitHub 设置中 "Preview" 环境里的 Secrets
+    environment: Preview
 
     steps:
       - name: Checkout repository
@@ -132,14 +129,56 @@ jobs:
 
       - name: Build Next.js
         env:
-          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }} # 自动拉取 Preview 环境下的数据库链接
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
 
-      # 将打包好的当前分支代码推送到 Azure
-      - name: Deploy Branch Code to Azure Web App
+      - name: Deploy to Preview Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'nextjs-dashboard'  # 改为你的 Azure App Service 名称
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          app-name: ${{ secrets.AZURE_APP_NAME }} # 在 Preview 环境的 Secrets 中填测试 Azure App 名字
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # 自动拉取 Preview 环境下的发布凭据
+          package: .
+
+  # ==========================================
+  # Job 3b: 部署【Production 生产环境】(当合并到 main/master 时触发)
+  # ==========================================
+  deploy-production:
+    needs: build-and-test
+    # 当推送到 main 或 master 分支时触发
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+
+    # 🌟 关键：自动使用 GitHub 设置中 "Production" 环境里的 Secrets
+    environment: Production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.15.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }} # 自动拉取 Production 环境下的数据库链接
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+        run: pnpm build
+
+      - name: Deploy to Production Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_APP_NAME }} # 在 Production 环境的 Secrets 中填生产 Azure App 名字
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # 自动拉取 Production 环境下的发布凭据
           package: .
