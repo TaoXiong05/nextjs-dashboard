@@ -45,6 +45,14 @@ jobs:
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
         run: pnpm build
 
+        # 🌟 1. 复制静态文件到 standalone 文件夹（Next.js standalone 模式必须步骤）
+      - name: Copy static files to standalone
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+
+     
+
   # ==========================================
   # Job 2: CD Docker 镜像构建与自动推送（包含 PR 环境验证）
   # ==========================================
@@ -144,7 +152,7 @@ jobs:
         with:
           app-name: ${{ secrets.AZURE_APP_NAME }} # 在 Preview 环境的 Secrets 中填测试 Azure App 名字
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # 自动拉取 Preview 环境下的发布凭据
-          package: .
+          package: .next/standalone
 
   # ==========================================
   # Job 3b: 部署【Production 生产环境】(当合并到 main/master 时触发)
@@ -193,4 +201,4 @@ jobs:
         with:
           app-name: ${{ secrets.AZURE_APP_NAME }} # 在 Production 环境的 Secrets 中填生产 Azure App 名字
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} # 自动拉取 Production 环境下的发布凭据
-          package: .
+          package: .next/standalone
