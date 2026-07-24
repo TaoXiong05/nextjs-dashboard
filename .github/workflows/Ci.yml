@@ -148,11 +148,20 @@ jobs:
           cp -r .next/static .next/standalone/.next/static
           cp -r public .next/standalone/public
 
-      # 🌟 2. 压缩 standalone，注意 zip 命令添加 -y 标志（保持符号链接）
+      # 🌟 2. 关键突破：解开 pnpm 软链接，强制重构 node_modules 为真实物理文件
+      - name: Dereference Symlinks
+        run: |
+          cd .next/standalone
+          # 复制并替换所有软链接为实际的文件/文件夹（彻底解决 zip / Azure 不支持 symlink 的问题）
+          cp -rL node_modules node_modules_flat
+          rm -rf node_modules
+          mv node_modules_flat node_modules
+
+      # 🌟 3. 打包解开软链接后的 standalone 产物
       - name: Zip standalone package
         run: |
           cd .next/standalone
-          zip -r -y ../../deploy.zip .
+          zip -r ../../deploy.zip .
           cd ../..
 
       - name: Deploy to Preview Azure Web App
@@ -205,11 +214,20 @@ jobs:
           cp -r .next/static .next/standalone/.next/static
           cp -r public .next/standalone/public
 
-      # 🌟 2. 压缩 standalone，注意 zip 命令添加 -y 标志（保持符号链接）
+      # 🌟 2. 关键突破：解开 pnpm 软链接，强制重构 node_modules 为真实物理文件
+      - name: Dereference Symlinks
+        run: |
+          cd .next/standalone
+          # 复制并替换所有软链接为实际的文件/文件夹（彻底解决 zip / Azure 不支持 symlink 的问题）
+          cp -rL node_modules node_modules_flat
+          rm -rf node_modules
+          mv node_modules_flat node_modules
+
+      # 🌟 3. 打包解开软链接后的 standalone 产物
       - name: Zip standalone package
         run: |
           cd .next/standalone
-          zip -r -y ../../deploy.zip .
+          zip -r ../../deploy.zip .
           cd ../..
 
       - name: Deploy to Production Azure Web App
