@@ -26,13 +26,13 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11
 
       # 3. 安装 Node，并让 setup-node 自动缓存 pnpm store，加速后续运行
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "25"
           cache: "pnpm"
 
       # 4. 安装依赖（--frozen-lockfile 保证严格按 lockfile 安装，
