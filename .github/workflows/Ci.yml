@@ -1,15 +1,11 @@
 name: CI
 
-# 触发条件：
-# - push 到 main 分支
-# - 对 main 分支发起 pull request 时（这样合并前就能看到检查结果）
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
-# 同一分支上有新的 push 时，取消掉旧的、还没跑完的流程，省资源
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -17,37 +13,65 @@ concurrency:
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
-    steps:
-      # 1. 把仓库代码拉到 runner 上
-      - name: Checkout code
-        uses: actions/checkout@v6
 
-      # 2. 安装 pnpm（要放在 setup-node 之前，因为下一步要用 pnpm 做缓存）
+    # 🐘 定义 Postgres 服务容器
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: next_dashboard
+        ports:
+          - 5432:5432
+        # 确保 Postgres 容器就绪后再开始跑 steps
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 11
 
-      # 3. 安装 Node，并让 setup-node 自动缓存 pnpm store，加速后续运行
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "25"
           cache: "pnpm"
 
-      # 4. 安装依赖（--frozen-lockfile 保证严格按 lockfile 安装，
-      #    如果 lockfile 和 package.json 对不上会直接报错，而不是静默改动它）
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 5. ESLint 检查代码规范
       - name: Lint
         run: pnpm lint
 
-      # 6. TypeScript 类型检查（不生成文件，只检查类型错误）
       - name: Type check
         run: pnpm exec tsc --noEmit
 
-      # 7. 构建，验证生产环境能否正常打包
+      # 🌱 可选：如果你有播种脚本（如 seed 脚本初始化数据库表和测试数据）
+      # - name: Seed database
+      #   env:
+      #     POSTGRES_URL: "postgres://postgres:postgrespassword@localhost:5432/next_dashboard"
+      #   run: pnpm seed  # 对应 package.json 中如果定义了 seed 命令的话
+
       - name: Build
+        env:
+          # 传递真实连向本地 5432 端口 Postgres 的连接串
+          POSTGRES_URL: "postgres://postgres:postgrespassword@localhost:5432/next_dashboard"
+          AUTH_SECRET: "ci-build-secret-key-placeholder"
         run: pnpm build
