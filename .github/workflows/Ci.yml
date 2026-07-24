@@ -99,3 +99,47 @@ jobs:
           build-args: |
             POSTGRES_URL=${{ secrets.POSTGRES_URL }}
             AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+
+
+
+
+            # ==========================================
+  # Job 3: 源码部署到 Azure App Service (免费层)
+  # ==========================================
+  deploy-branch-to-azure:
+    needs: build-and-test
+    # 允许在当前分支推送时触发部署
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.15.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+        run: pnpm build
+
+      # 将打包好的当前分支代码推送到 Azure
+      - name: Deploy Branch Code to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'nextjs-dashboard'  # 改为你的 Azure App Service 名称
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: .
