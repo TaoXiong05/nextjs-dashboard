@@ -1,12 +1,26 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
+import GitHub from 'next-auth/providers/github';
+import PostgresAdapter from '@auth/pg-adapter';
+import { Pool } from 'pg';
 import { authConfig } from './auth.config';
 import { z } from 'zod';
 import type { User } from '@/app/lib/definitions';
 import bcrypt from 'bcrypt';
 import postgres from 'postgres';
 
-const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+const isLocalDb = process.env.POSTGRES_URL?.includes('localhost');
+
+const sql = postgres(process.env.POSTGRES_URL!, {
+  ssl: isLocalDb ? false : 'require',
+});
+
+// @auth/pg-adapter 需要 node-postgres 的 Pool，跟上面业务查询用的
+// postgres.js 客户端是两个库，各管各的，互不影响
+const pool = new Pool({
+  connectionString: process.env.POSTGRES_URL,
+  ssl: isLocalDb ? false : { rejectUnauthorized: false },
+});
 
 async function getUser(email: string): Promise<User | undefined> {
     try {
@@ -18,8 +32,12 @@ async function getUser(email: string): Promise<User | undefined> {
     }
 }
 
-export const { auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn, signOut } = NextAuth({
     ...authConfig,
+    // 有 Credentials provider 存在时 Auth.js 强制用 JWT 会话（不会用数据库存 session），
+    // 但 adapter 依然会在 GitHub 登录时把用户 upsert 进 users/accounts 表
+    session: { strategy: 'jwt' },
+    adapter: PostgresAdapter(pool),
     providers: [
         Credentials({
             async authorize(credentials) {
@@ -39,6 +57,10 @@ export const { auth, signIn, signOut } = NextAuth({
                 console.log('Invalid credentials');
                 return null;
             },
+        }),
+        GitHub({
+            clientId: process.env.AUTH_GITHUB_ID,
+            clientSecret: process.env.AUTH_GITHUB_SECRET,
         }),
     ],
 });

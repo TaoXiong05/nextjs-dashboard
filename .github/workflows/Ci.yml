@@ -96,6 +96,8 @@ jobs:
           build-args: |
             POSTGRES_URL=${{ secrets.POSTGRES_URL }}
             AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+            AUTH_GITHUB_ID=${{ secrets.AUTH_GITHUB_ID }}
+            AUTH_GITHUB_SECRET=${{ secrets.AUTH_GITHUB_SECRET }}
 
   # ==========================================
   # Job 3a: 自动部署 Docker 镜像到【Preview 预览/测试环境】
