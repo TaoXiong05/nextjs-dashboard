@@ -62,6 +62,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         GitHub({
             clientId: process.env.AUTH_GITHUB_ID,
             clientSecret: process.env.AUTH_GITHUB_SECRET,
+            // GitHub 会验证邮箱所有权，允许跟已有的同邮箱账号自动关联
+            allowDangerousEmailAccountLinking: true,
+        }),
+        Google({
+            clientId: process.env.AUTH_GOOGLE_ID,
+            clientSecret: process.env.AUTH_GOOGLE_SECRET,
+            // Google 同理，邮箱是验证过的，允许自动关联
+            allowDangerousEmailAccountLinking: true,
         }),
         Google({
             clientId: process.env.AUTH_GOOGLE_ID,

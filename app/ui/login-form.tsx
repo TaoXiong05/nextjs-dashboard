@@ -16,10 +16,20 @@ import { useSearchParams } from 'next/navigation';
 export default function LoginForm() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
+  const oauthError = searchParams.get('error');
   const [errorMessage, formAction, isPending ] = useActionState(
     authenticate,
     undefined,
   );
+
+  // OAuth 登录失败时 NextAuth 会带着 error 参数跳回这个页面，
+  // 这里把常见的错误代码翻译成用户能看懂的提示
+  const oauthErrorMessage = oauthError
+    ? oauthError === 'OAuthAccountNotLinked'
+      ? '这个邮箱已经绑定过其他登录方式，请用原来的方式登录。'
+      : '第三方登录失败，请重试。'
+    : null;
+
   return (
     <form action={formAction} className="space-y-3">
       <div className="flex-1 rounded-lg bg-gray-50 px-6 pb-4 pt-8">
@@ -81,6 +91,12 @@ export default function LoginForm() {
             <>
               <ExclamationCircleIcon className="h-5 w-5 text-red-500" />
               <p className="text-sm text-red-500">{errorMessage}</p>
+            </>
+          )}
+          {oauthErrorMessage && (
+            <>
+              <ExclamationCircleIcon className="h-5 w-5 text-red-500" />
+              <p className="text-sm text-red-500">{oauthErrorMessage}</p>
             </>
           )}
         </div>
