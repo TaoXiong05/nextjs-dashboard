@@ -71,5 +71,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             // Google 同理，邮箱是验证过的，允许自动关联
             allowDangerousEmailAccountLinking: true,
         }),
+        Google({
+            clientId: process.env.AUTH_GOOGLE_ID,
+            clientSecret: process.env.AUTH_GOOGLE_SECRET,
+        }),
     ],
 });
