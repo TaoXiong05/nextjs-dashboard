@@ -1,0 +1,142 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, 'TaoXiong05-patch-1', 'feature/*' ]
+  pull_request:
+    branches: [ main, master ]
+
+# 并发控制：连续 Push 时自动取消未跑完的构建
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================
+  # Job 1: CI 自动化校验 (Lint & 本地 Build 测试)
+  # ==========================================
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.15.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 25.7.0
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Linter
+        run: pnpm lint
+
+      - name: Build Next.js Verification
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+        run: pnpm build
+
+  # ==========================================
+  # Job 2: CD 构建 Docker 镜像并推送至 GitHub GHCR
+  # ==========================================
+  deploy-docker:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write # 开启写入 GHCR 镜像仓库权限
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 智能提取 Tag 标签：
+      # main/master 分支 -> latest 和 sha
+      # 其他 Preview 分支 -> 分支名 和 sha
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,format=short
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            POSTGRES_URL=${{ secrets.POSTGRES_URL }}
+            AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+
+  # ==========================================
+  # Job 3a: 自动部署 Docker 镜像到【Preview 预览/测试环境】
+  # ==========================================
+  deploy-preview:
+    needs: deploy-docker # 👈 修改为等待 Docker 镜像推送完毕后执行
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    environment: Preview
+
+    steps:
+      # 智能将分支名称格式化（转小写、特殊字符转横杠），保障与 GHCR 镜像 Tag 对应
+      - name: Sanitize Branch Name for Docker Tag
+        id: extract_branch
+        run: |
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+          SANITIZED_TAG=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9._-]/-/g')
+          echo "tag=$SANITIZED_TAG" >> $GITHUB_OUTPUT
+
+      - name: Deploy Docker Container to Preview Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: 'ghcr.io/${{ github.repository }}:${{ steps.extract_branch.outputs.tag }}' # 👈 部署当前分支的专属 Docker 镜像
+
+  # ==========================================
+  # Job 3b: 自动部署 Docker 镜像到【Production 生产环境】
+  # ==========================================
+  deploy-production:
+    needs: deploy-docker # 👈 修改为等待 Docker 镜像推送完毕后执行
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+
+    environment: Production
+
+    steps:
+      - name: Deploy Docker Container to Production Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: 'ghcr.io/${{ github.repository }}:latest' # 👈 生产环境直接拉取 :latest 镜像
