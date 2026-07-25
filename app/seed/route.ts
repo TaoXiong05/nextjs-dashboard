@@ -2,7 +2,9 @@ import bcrypt from 'bcrypt';
 import postgres from 'postgres';
 import { invoices, customers, revenue, users } from '../lib/placeholder-data';
 
-const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+const sql = postgres(process.env.POSTGRES_URL!, {
+  ssl: process.env.POSTGRES_URL?.includes('localhost') ? false : 'require',
+});
 
 async function seedUsers() {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
@@ -11,9 +13,15 @@ async function seedUsers() {
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       email TEXT NOT NULL UNIQUE,
-      password TEXT NOT NULL
+      password TEXT
     );
   `;
+
+  // 兼容老表：如果 users 表是之前建的（password 是 NOT NULL），
+  // 这里把约束放开，并补上 Auth.js adapter 需要的两个字段
+  await sql`ALTER TABLE users ALTER COLUMN password DROP NOT NULL`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "emailVerified" TIMESTAMPTZ`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS image TEXT`;
 
   const insertedUsers = await Promise.all(
     users.map(async (user) => {
@@ -27,6 +35,46 @@ async function seedUsers() {
   );
 
   return insertedUsers;
+}
+
+async function seedAuthTables() {
+  // @auth/pg-adapter 需要这三张表才能工作。
+  // userId 用 UUID 是为了跟你项目现有的 users.id 类型对上。
+  await sql`
+    CREATE TABLE IF NOT EXISTS accounts (
+      id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+      "userId" UUID NOT NULL,
+      type VARCHAR(255) NOT NULL,
+      provider VARCHAR(255) NOT NULL,
+      "providerAccountId" VARCHAR(255) NOT NULL,
+      refresh_token TEXT,
+      access_token TEXT,
+      expires_at BIGINT,
+      token_type TEXT,
+      scope TEXT,
+      id_token TEXT,
+      session_state TEXT,
+      UNIQUE(provider, "providerAccountId")
+    );
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+      "userId" UUID NOT NULL,
+      expires TIMESTAMPTZ NOT NULL,
+      "sessionToken" VARCHAR(255) NOT NULL UNIQUE
+    );
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS verification_token (
+      identifier TEXT NOT NULL,
+      expires TIMESTAMPTZ NOT NULL,
+      token TEXT NOT NULL,
+      PRIMARY KEY (identifier, token)
+    );
+  `;
 }
 
 async function seedInvoices() {
@@ -105,6 +153,7 @@ export async function GET() {
   try {
     const result = await sql.begin((sql) => [
       seedUsers(),
+      seedAuthTables(),
       seedCustomers(),
       seedInvoices(),
       seedRevenue(),
