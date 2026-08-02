@@ -6,7 +6,7 @@ import PostgresAdapter from '@auth/pg-adapter';
 import { Pool } from 'pg';
 import { authConfig } from './auth.config';
 import { z } from 'zod';
-import type { User } from '@/app/lib/definitions';
+import type { User, Role } from '@/app/lib/definitions';
 import bcrypt from 'bcrypt';
 import postgres from 'postgres';
 
@@ -39,6 +39,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // 但 adapter 依然会在 GitHub 登录时把用户 upsert 进 users/accounts 表
     session: { strategy: 'jwt' },
     adapter: PostgresAdapter(pool),
+    callbacks: {
+        ...authConfig.callbacks,
+        // 登录时才查库拿角色，写进 token，避免每次请求都查数据库
+        async jwt({ token, user }) {
+            if (user?.email) {
+                const dbUser = await getUser(user.email);
+                token.role = dbUser?.role ?? 'user';
+            }
+            return token;
+        },
+        async session({ session, token }) {
+            if (session.user) {
+                session.user.role = (token.role as Role | undefined) ?? 'user';
+            }
+            return session;
+        },
+    },
     providers: [
         Credentials({
             async authorize(credentials) {

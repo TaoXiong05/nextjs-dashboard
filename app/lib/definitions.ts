@@ -2,11 +2,14 @@
 // It describes the shape of the data, and what data type each property should accept.
 // For simplicity of teaching, we're manually defining these types.
 // However, these types are generated automatically if you're using an ORM such as Prisma.
+export type Role = 'admin' | 'user';
+
 export type User = {
   id: string;
   name: string;
   email: string;
   password: string;
+  role: Role;
 };
 
 export type Customer = {
@@ -14,6 +17,7 @@ export type Customer = {
   name: string;
   email: string;
   image_url: string;
+  phone: string | null;
 };
 
 export type Invoice = {
@@ -60,6 +64,7 @@ export type CustomersTableType = {
   name: string;
   email: string;
   image_url: string;
+  phone: string | null;
   total_invoices: number;
   total_pending: number;
   total_paid: number;
@@ -70,6 +75,7 @@ export type FormattedCustomersTable = {
   name: string;
   email: string;
   image_url: string;
+  phone: string | null;
   total_invoices: number;
   total_pending: string;
   total_paid: string;
@@ -78,6 +84,14 @@ export type FormattedCustomersTable = {
 export type CustomerField = {
   id: string;
   name: string;
+};
+
+export type CustomerForm = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  image_url: string;
 };
 
 export type InvoiceForm = {

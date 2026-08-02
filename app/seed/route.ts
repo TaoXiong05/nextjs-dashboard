@@ -22,6 +22,8 @@ async function seedUsers() {
   await sql`ALTER TABLE users ALTER COLUMN password DROP NOT NULL`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "emailVerified" TIMESTAMPTZ`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS image TEXT`;
+  // 角色字段：用于客户页面的权限管理（admin 可增删改/导入，user 仅可查看/导出）
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user'`;
 
   const insertedUsers = await Promise.all(
     users.map(async (user) => {
@@ -111,9 +113,12 @@ async function seedCustomers() {
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       email VARCHAR(255) NOT NULL,
-      image_url VARCHAR(255) NOT NULL
+      image_url VARCHAR(255) NOT NULL,
+      phone VARCHAR(50)
     );
   `;
+  // 联系方式字段：老表可能已存在但缺这一列
+  await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone VARCHAR(50)`;
 
   const insertedCustomers = await Promise.all(
     customers.map(
